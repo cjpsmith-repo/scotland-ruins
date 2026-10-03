@@ -41,6 +41,15 @@ input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{ou
 .summary b{font:500 22px var(--data);color:var(--ink);font-variant-numeric:tabular-nums}
 button.reset{font:13px var(--body);background:none;border:1px solid var(--rule);color:var(--ink);border-radius:3px;padding:6px 10px;cursor:pointer}
 .note{font-size:13px;color:var(--muted);border-top:1px solid var(--rule);padding-top:10px;margin:0}
+.dist{display:grid;gap:8px;border:1px solid var(--rule);background:var(--sheet);border-radius:4px;padding:10px 12px}
+.dist .row2{align-items:end}
+.quick{display:flex;gap:6px;flex-wrap:wrap}
+.quick button{font:12px var(--body);background:var(--ground);border:1px solid var(--rule);color:var(--ink);border-radius:999px;padding:4px 10px;cursor:pointer}
+.quick button[aria-pressed="true"]{background:var(--ink);color:var(--sheet);border-color:var(--ink)}
+.diststatus{font-size:12px;color:var(--muted);margin:0}
+.diststatus.err{color:var(--warn)}
+.meta.drive{color:var(--ink)}
+.meta.drive small{color:var(--muted)}
 .ledger{display:grid;border-top:2px solid var(--ink)}
 .site{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(0,1.3fr) minmax(0,3fr);gap:6px 20px;padding:14px 4px;border-bottom:1px solid var(--rule);scroll-margin-top:16px}
 .site.flash{background:var(--heather-soft)}
@@ -133,13 +142,19 @@ button.reset{font:13px var(--body);background:none;border:1px solid var(--rule);
       <label id="whobox" hidden>Your name, shown on sites you add<input type="text" id="who" maxlength="40" placeholder="e.g. Chris"></label>
       <label class="check"><input type="checkbox" id="photosonly"> Only sites with photos</label>
       <div class="row2">
-        <label>Order<select id="sort"><option value="rank">Wedding rank</option><option value="az">A to Z</option></select></label>
+        <label>Order<select id="sort"><option value="rank">Wedding rank</option><option value="az">A to Z</option><option value="dist">Nearest by car</option></select></label>
         <label>Ceremony<select id="ceremony"><option value="">Any</option><option value="book">Bookable now</option><option value="perm">Bookable or by permission</option></select></label>
       </div>
       <div class="weights" id="weights">
         <div class="head"><span>Ranking weights</span><button type="button" id="wreset">Reset</button></div>
       </div>
       <label>Search<input type="search" id="q" placeholder="Name, town, or note"></label>
+      <div class="dist">
+        <label>Distance by car from<input type="search" id="place" list="places" placeholder="Edinburgh, Glasgow, Aberdeen, or any town" autocomplete="off" enterkeyhint="search"><datalist id="places"></datalist></label>
+        <div class="quick" id="quick"><button type="button" data-place="Edinburgh">Edinburgh</button><button type="button" data-place="Glasgow">Glasgow</button><button type="button" data-place="Aberdeen">Aberdeen</button><button type="button" data-place="Edinburgh Airport">EDI airport</button><button type="button" data-place="Glasgow Airport">GLA airport</button></div>
+        <label>Within<select id="radius"><option value="">Any distance</option><option value="t:30">30 min drive</option><option value="t:60">1 hour drive</option><option value="t:90">1½ hours drive</option><option value="t:120">2 hours drive</option><option value="t:180">3 hours drive</option><option value="d:25">25 road miles</option><option value="d:50">50 road miles</option><option value="d:75">75 road miles</option><option value="d:100">100 road miles</option><option value="d:150">150 road miles</option></select></label>
+        <p class="diststatus" id="diststatus" hidden></p>
+      </div>
       <div class="row2">
         <label>Type<select id="type"><option value="">All types</option></select></label>
         <label>Setting<select id="setting"><option value="">Any setting</option></select></label>
@@ -270,17 +285,103 @@ async function sheetCall(body){
 }
 function whoName(){ try{return localStorage.getItem('ruins-who')||'';}catch(e){return '';} }
 
+
+/* distance by car: road routing from OSRM (OpenStreetMap), cached per origin; straight-line estimate if routing is unavailable */
+const TOWNS=[['Edinburgh',55.953,-3.189],['Glasgow',55.861,-4.251],['Aberdeen',57.149,-2.094],['Dundee',56.462,-2.970],['Inverness',57.478,-4.224],['Perth',56.396,-3.437],['Stirling',56.117,-3.937],
+['Edinburgh Airport',55.950,-3.372],['Glasgow Airport',55.872,-4.433],['Aberdeen Airport',57.202,-2.198],['Inverness Airport',57.543,-4.048],['Prestwick Airport',55.509,-4.587],['Dundee Airport',56.452,-3.026],
+['Paisley',55.847,-4.440],['Livingston',55.883,-3.515],['Hamilton',55.777,-4.039],['Dunfermline',56.072,-3.452],['Kirkcaldy',56.112,-3.159],['Ayr',55.458,-4.629],['Kilmarnock',55.611,-4.496],['Greenock',55.949,-4.765],['Falkirk',56.001,-3.784],['Irvine',55.612,-4.669],['Dumfries',55.070,-3.605],['Motherwell',55.789,-3.991],['East Kilbride',55.764,-4.177],['Cumbernauld',55.945,-3.994],['Glenrothes',56.198,-3.178],['Airdrie',55.860,-3.980],['Coatbridge',55.862,-4.026],['Arbroath',56.561,-2.588],['Elgin',57.649,-3.319],['Dumbarton',55.945,-4.565],['Alloa',56.116,-3.792],['Peterhead',57.508,-1.784],['Montrose',56.708,-2.467],['Stonehaven',56.964,-2.211],['Fort William',56.820,-5.105],['Oban',56.415,-5.471],['Fraserburgh',57.693,-2.005],['Inverurie',57.284,-2.377],['Forfar',56.644,-2.889],
+['Galashiels',55.618,-2.808],['Hawick',55.422,-2.787],['Peebles',55.652,-3.189],['Melrose',55.599,-2.727],['Kelso',55.598,-2.434],['Jedburgh',55.479,-2.554],['Selkirk',55.548,-2.840],['Lanark',55.674,-3.777],['Biggar',55.623,-3.524],['Stranraer',54.902,-5.027],['Newton Stewart',54.957,-4.485],['Kirkcudbright',54.836,-4.052],['Castle Douglas',54.941,-3.927],['Moffat',55.333,-3.444],['Lockerbie',55.123,-3.354],['Annan',54.988,-3.256],['Gretna',54.995,-3.063],['Girvan',55.242,-4.858],['Largs',55.794,-4.867],['Troon',55.542,-4.661],['Prestwick',55.495,-4.614],['Helensburgh',56.004,-4.734],['Callander',56.244,-4.215],['Aberfeldy',56.619,-3.867],['Pitlochry',56.704,-3.733],['Crieff',56.373,-3.839],['Kinross',56.205,-3.421],['St Andrews',56.340,-2.796],['Cupar',56.320,-3.010],['Anstruther',56.223,-2.702],['North Berwick',56.058,-2.720],['Dunbar',56.003,-2.516],['Haddington',55.957,-2.776],['Linlithgow',55.977,-3.600],['Bathgate',55.902,-3.643],
+['Lerwick',60.155,-1.145],['Kirkwall',58.981,-2.960],['Stromness',58.965,-3.296],['Stornoway',58.209,-6.387],['Portree',57.413,-6.194],['Ullapool',57.895,-5.160],['Wick',58.439,-3.093],['Thurso',58.594,-3.522],['Dornoch',57.880,-4.029],['Tain',57.811,-4.056],['Golspie',57.973,-3.979],['Nairn',57.586,-3.869],['Forres',57.608,-3.620],['Keith',57.546,-2.950],['Huntly',57.446,-2.785],['Banff',57.666,-2.524],['Ballater',57.050,-3.040],['Braemar',57.006,-3.397],['Aviemore',57.195,-3.826],['Kingussie',57.080,-4.052],['Newtonmore',57.066,-4.120],['Grantown-on-Spey',57.330,-3.606],['Dingwall',57.596,-4.429],['Mallaig',57.004,-5.828],['Kyle of Lochalsh',57.280,-5.713],['Tobermory',56.623,-6.070],['Campbeltown',55.426,-5.607],['Lochgilphead',56.040,-5.432],['Inveraray',56.231,-5.072],['Tarbert',55.866,-5.411],['Rothesay',55.838,-5.055],['Brodick',55.577,-5.150],['Dunoon',55.948,-4.925],['Tyndrum',56.436,-4.712],['Killin',56.467,-4.319],['Dunkeld',56.564,-3.586],['Blairgowrie',56.591,-3.341],['Kirriemuir',56.671,-3.003],['Brechin',56.730,-2.657],['Carnoustie',56.501,-2.710],
+['Dalkeith',55.895,-3.067],['Penicuik',55.830,-3.221],['Musselburgh',55.942,-3.053],['South Queensferry',55.990,-3.398],['Dunblane',56.188,-3.966],['Bridge of Allan',56.153,-3.944],["Bo'ness",56.017,-3.610],['Cumnock',55.456,-4.265],['Maybole',55.355,-4.683],['Saltcoats',55.634,-4.789],['Gourock',55.961,-4.817],['Milngavie',55.941,-4.317],['Strathaven',55.677,-4.065],['Wigtown',54.867,-4.442],['Whithorn',54.733,-4.417],['Langholm',55.150,-2.998],['Eyemouth',55.871,-2.090],['Coldstream',55.651,-2.249],['Duns',55.777,-2.344],['Ellon',57.366,-2.085],['Banchory',57.053,-2.490],['Aboyne',57.075,-2.783],['Alford',57.233,-2.703],['Turriff',57.538,-2.459],['Lairg',58.021,-4.398],['Brora',58.011,-3.853],['Durness',58.568,-4.746],["John o' Groats",58.643,-3.070],['Gairloch',57.728,-5.690],['Lochinver',58.148,-5.244],['Broadford',57.242,-5.906],['Dunvegan',57.441,-6.584],['Uig',57.586,-6.360],['Bowmore',55.757,-6.287],['Port Ellen',55.629,-6.190],['Craignure',56.471,-5.705],['Drumnadrochit',57.336,-4.480],['Fort Augustus',57.144,-4.680],['Beauly',57.483,-4.462],['Cromarty',57.680,-4.036],['Spean Bridge',56.890,-4.920],['Glencoe',56.683,-5.102],['Ballachulish',56.681,-5.182],['Lochearnhead',56.388,-4.289],['Aberfoyle',56.179,-4.388],['Balloch',56.003,-4.583],['Drymen',56.065,-4.453],['Luss',56.101,-4.638],['Arrochar',56.200,-4.746],['Dalmally',56.405,-4.980],['Taynuilt',56.432,-5.237],
+['Dufftown',57.444,-3.128],['Aberlour',57.471,-3.230],['Tomintoul',57.254,-3.374],['Buckie',57.676,-2.962],['Cullen',57.690,-2.819],['Macduff',57.671,-2.498],['Portsoy',57.685,-2.690],['Lossiemouth',57.721,-3.286],['Fochabers',57.616,-3.098],['Dyce',57.205,-2.191],['Westhill',57.153,-2.282],['Portlethen',57.061,-2.131],['Laurencekirk',56.835,-2.466],['Edzell',56.809,-2.651],['Alyth',56.623,-3.230],['Coupar Angus',56.549,-3.267],['Newport-on-Tay',56.441,-2.941],['Leven',56.195,-2.997],['Burntisland',56.062,-3.232],['Cowdenbeath',56.112,-3.345],['Lochgelly',56.128,-3.311],['Kinghorn',56.069,-3.172],['Culross',56.056,-3.631],['Kincardine',56.066,-3.721],['Tillicoultry',56.153,-3.743],['Dollar',56.163,-3.675],['Auchterarder',56.296,-3.706],['Comrie',56.375,-3.998],['Blair Atholl',56.766,-3.847],['Kinloch Rannoch',56.703,-4.189],['Dalwhinnie',56.936,-4.244],['Carrbridge',57.283,-3.818],['Nethy Bridge',57.263,-3.650],['Fortrose',57.581,-4.130],['Alness',57.695,-4.251],['Invergordon',57.686,-4.167],['Bonar Bridge',57.887,-4.344],['Helmsdale',58.115,-3.653],['Lybster',58.299,-3.293],['Bettyhill',58.526,-4.222],['Tongue',58.473,-4.421],['Kinlochbervie',58.459,-5.051],['Scourie',58.351,-5.159],['Achiltibuie',58.025,-5.350],['Poolewe',57.760,-5.602],['Kinlochewe',57.611,-5.303],['Torridon',57.544,-5.516],['Applecross',57.433,-5.814],['Shieldaig',57.517,-5.650],['Lochcarron',57.398,-5.489],['Plockton',57.337,-5.657],['Dornie',57.273,-5.516],['Glenelg',57.212,-5.621],['Invergarry',57.071,-4.776],['Arisaig',56.911,-5.848],['Glenfinnan',56.872,-5.449],['Strontian',56.693,-5.572],['Lochaline',56.537,-5.777],['Kilchoan',56.690,-6.113],['Fionnphort',56.325,-6.368],['Bunessan',56.318,-6.235],['Craighouse',55.833,-5.950],['Port Askaig',55.848,-6.107],['Portnahaven',55.680,-6.510],['Lochranza',55.705,-5.293],['Lamlash',55.534,-5.126],['Millport',55.753,-4.922],['Tighnabruaich',55.909,-5.235],['Lochgoilhead',56.165,-4.904],['Carradale',55.588,-5.467],['Skipness',55.763,-5.345],['Kilmartin',56.133,-5.486],['Crinan',56.090,-5.550],['Ardrishaig',56.014,-5.448],['Kennacraig',55.802,-5.470],['Benderloch',56.483,-5.414],['Appin',56.556,-5.380],['Kinlochleven',56.714,-4.960],['Onich',56.705,-5.213],['Lochmaddy',57.597,-7.160],['Lochboisdale',57.153,-7.302],['Castlebay',56.953,-7.487],['Tarbert, Harris',57.898,-6.800],['Leverburgh',57.767,-7.030],['Balivanich',57.465,-7.373],
+['Aberlady',56.009,-2.859],['Gullane',56.038,-2.830],['Tranent',55.945,-2.954],['Prestonpans',55.959,-2.983],['Longniddry',55.976,-2.887],['East Linton',55.988,-2.654],['Gifford',55.903,-2.750],['Pathhead',55.861,-3.005],['Gorebridge',55.843,-3.044],['Bonnyrigg',55.874,-3.108],['Loanhead',55.877,-3.157],['Roslin',55.856,-3.166],['Balerno',55.885,-3.341],['Currie',55.896,-3.311],['Ratho',55.921,-3.381],['Kirkliston',55.955,-3.403],['Winchburgh',55.963,-3.464],['Broxburn',55.934,-3.471],['West Calder',55.852,-3.572],['Armadale',55.898,-3.700],['Whitburn',55.869,-3.687],['Shotts',55.819,-3.802],['Carluke',55.735,-3.837],['Lesmahagow',55.638,-3.885],['Douglas',55.552,-3.846],['Abington',55.497,-3.690],['Sanquhar',55.368,-3.925],['Thornhill',55.242,-3.767],['Moniaive',55.196,-3.921],['New Galloway',55.080,-4.146],['Dalbeattie',54.930,-3.822],['Gatehouse of Fleet',54.878,-4.183],['Creetown',54.906,-4.380],['Port William',54.760,-4.583],['Glenluce',54.876,-4.812],['Portpatrick',54.842,-5.117],['Ballantrae',55.100,-5.007],['Dalmellington',55.321,-4.398],['Mauchline',55.516,-4.379],['Galston',55.601,-4.383],['Stewarton',55.681,-4.515],['Beith',55.750,-4.634],['Kilwinning',55.655,-4.705],['Ardrossan',55.642,-4.809],['West Kilbride',55.693,-4.858],['Wemyss Bay',55.877,-4.892],['Inverkip',55.909,-4.870],['Kilmacolm',55.896,-4.633],['Bridge of Weir',55.857,-4.577],['Johnstone',55.834,-4.517],['Barrhead',55.800,-4.391],['Newton Mearns',55.771,-4.333],['Eaglesham',55.742,-4.274],['Lennoxtown',55.973,-4.200],['Kilsyth',55.978,-4.059],['Kirkintilloch',55.939,-4.154],['Bearsden',55.918,-4.333],['Clydebank',55.901,-4.407],['Renfrew',55.874,-4.389],['Rutherglen',55.829,-4.214],['Cambuslang',55.819,-4.165],['Uddingston',55.822,-4.085],['Bellshill',55.816,-4.026],['Wishaw',55.775,-3.919],['Larkhall',55.737,-3.972],['Blantyre',55.795,-4.095],['Bothwell',55.802,-4.067],
+['Lauder',55.719,-2.746],['Earlston',55.640,-2.673],['St Boswells',55.573,-2.642],['Innerleithen',55.620,-3.062],['West Linton',55.750,-3.356],['Greenlaw',55.711,-2.465],['Coldingham',55.886,-2.165],['Newcastleton',55.185,-2.812],['Berwick-upon-Tweed',55.771,-2.007],['Carlisle',54.893,-2.933],['Newcastle upon Tyne',54.978,-1.618],['Manchester',53.481,-2.243],['London',51.507,-0.128],['Belfast',54.597,-5.930]];
+const ORIGIN={name:'',lat:null,lon:null,src:'',req:0};
+const RF=1.3, MPH=38;   /* estimate: road miles ≈ straight line × 1.3, at ~38 mph average */
+const normP=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+function hav(la1,lo1,la2,lo2){const R=3958.8,p=Math.PI/180,dl=(la2-la1)*p,dg=(lo2-lo1)*p,a=Math.sin(dl/2)**2+Math.cos(la1*p)*Math.cos(la2*p)*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(a));}
+const nearName=s=>String(s).split(/[\/(]/)[0].trim();
+const PLACE_IDX=new Map(); TOWNS.forEach(t=>PLACE_IDX.set(normP(t[0]),{name:t[0],lat:t[1],lon:t[2]}));
+DATA.forEach(r=>{const n=nearName(r.near); if(n&&!PLACE_IDX.has(normP(n))) PLACE_IDX.set(normP(n),{name:n,lat:r.lat,lon:r.lon});});
+{const dl=$('places');[...PLACE_IDX.values()].map(p=>p.name).sort((a,b)=>a.localeCompare(b)).forEach(n=>{const o=document.createElement('option');o.value=n;dl.appendChild(o);});}
+function lookupLocal(name){
+  const n=normP(name); if(!n) return null;
+  if(PLACE_IDX.has(n)) return PLACE_IDX.get(n);
+  for(const [k,v] of PLACE_IDX) if(k.startsWith(n+' ')||k.split(',')[0]===n) return v;
+  const t=TOWNS.find(t=>normP(t[0]).startsWith(n)); if(t) return {name:t[0],lat:t[1],lon:t[2]};
+  for(const [k,v] of PLACE_IDX) if(k.startsWith(n)) return v;
+  return null;
+}
+async function geocode(name){
+  const u='https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=gb&accept-language=en&q='+encodeURIComponent(name);
+  const r=await fetch(u); if(!r.ok) throw new Error('geocode '+r.status);
+  const j=await r.json(); if(!j.length) return null;
+  const short=(j[0].display_name||name).split(',')[0].trim();
+  return {name:short||name,lat:+j[0].lat,lon:+j[0].lon};
+}
+function distStatus(t,err){const el=$('diststatus');el.hidden=!t;el.textContent=t||'';el.classList.toggle('err',!!err);}
+function paintQuick(){document.querySelectorAll('#quick [data-place]').forEach(b=>b.setAttribute('aria-pressed',String(ORIGIN.name===b.dataset.place)));}
+function clearOrigin(){ORIGIN.name='';ORIGIN.lat=ORIGIN.lon=null;ORIGIN.src='';ORIGIN.req++;$('place').value='';DATA.forEach(r=>{delete r.dm;delete r.dt;delete r.est;});distStatus('');paintQuick();}
+function applyEstimates(){DATA.forEach(r=>{const s=hav(ORIGIN.lat,ORIGIN.lon,r.lat,r.lon);r.dm=s*RF;r.dt=r.dm/MPH*60;r.est=true;});}
+async function driveTable(lat,lon){
+  const ck='ruins-drive:'+lat.toFixed(4)+','+lon.toFixed(4);
+  try{const c=JSON.parse(localStorage.getItem(ck)||'null');if(c&&c.n===DATA.length)return c;}catch(e){}
+  const dm=new Array(DATA.length), dt=new Array(DATA.length), B=99;
+  for(let i=0;i<DATA.length;i+=B){
+    const part=DATA.slice(i,i+B);
+    const coords=[[lon,lat],...part.map(r=>[r.lon,r.lat])].map(([a,b])=>a.toFixed(5)+','+b.toFixed(5)).join(';');
+    const u='https://router.project-osrm.org/table/v1/driving/'+coords+'?sources=0&annotations=distance,duration';
+    const res=await fetch(u); if(!res.ok) throw new Error('osrm '+res.status);
+    const j=await res.json(); if(j.code!=='Ok') throw new Error(j.code);
+    part.forEach((r,k)=>{const d=j.distances[0][k+1],t=j.durations[0][k+1];dm[i+k]=d==null?null:+(d/1609.344).toFixed(1);dt[i+k]=t==null?null:Math.round(t/60);});
+  }
+  const out={n:DATA.length,dm,dt}; try{localStorage.setItem(ck,JSON.stringify(out));}catch(e){}
+  return out;
+}
+async function setOrigin(name,coords){
+  name=String(name||'').trim(); const req=++ORIGIN.req;
+  if(!name){clearOrigin();filter();return;}
+  let p=coords||lookupLocal(name);
+  if(!p){
+    distStatus('Looking up “'+name+'”…');
+    try{p=await geocode(name);}catch(e){p=null;}
+    if(req!==ORIGIN.req) return;
+    if(!p){distStatus('Couldn’t find “'+name+'”. Try a town name, or pick one from the list.',true);return;}
+  }
+  ORIGIN.name=p.name;ORIGIN.lat=p.lat;ORIGIN.lon=p.lon;ORIGIN.src='est';$('place').value=p.name;paintQuick();
+  applyEstimates();filter();
+  distStatus('Getting road distances from '+p.name+'…');
+  try{
+    const t=await driveTable(p.lat,p.lon); if(req!==ORIGIN.req) return;
+    let miss=0; DATA.forEach((r,i)=>{if(t.dm[i]==null||t.dt[i]==null){miss++;return;}r.dm=t.dm[i];r.dt=t.dt[i];r.est=false;});
+    ORIGIN.src='osrm'; filter();
+    distStatus('Road distance and drive time from '+p.name+', via OSRM on OpenStreetMap data.'+(miss?' '+miss+' site'+(miss>1?'s':'')+' with no road route show straight-line estimates.':''));
+  }catch(e){
+    if(req!==ORIGIN.req) return;
+    distStatus('Road routing isn’t reachable right now. Showing estimates from '+p.name+': straight line × 1.3 at about 38 mph.',true);
+  }
+}
+const fmtMi=m=>(m<10?m.toFixed(1):Math.round(m))+' mi';
+function fmtMin(m){m=Math.round(m/5)*5;if(m<5)return 'under 5 min';if(m<60)return m+' min';const h=Math.floor(m/60),r=m%60;return h+' h'+(r?' '+r+' min':'');}
+function driveLine(r){
+  if(r.dm==null) return 'No distance available from '+esc(ORIGIN.name);
+  return `${fmtMi(r.dm)} · ${fmtMin(r.dt)} by car from ${esc(ORIGIN.name)}${r.est?' <small>(estimate)</small>':''}`;
+}
+
 let shown=[], limit=80;
 function filter(){
   scoreAll();
   const q=$('q').value.trim().toLowerCase();
   const sel={}; F.forEach(k=>sel[k]=$(k).value);
   const conf=$('confirmed').checked, cer=$('ceremony').value, slo=SL.only, pho=$('photosonly').checked;
+  const rad=$('radius').value, hasO=ORIGIN.lat!=null, radT=rad.startsWith('t:')?+rad.slice(2):0, radD=rad.startsWith('d:')?+rad.slice(2):0;
   shown=DATA.filter(r=>(!q||r.hay.includes(q))&&F.every(k=>!sel[k]||r[k]===sel[k])&&(!conf||!r.verify)
-    &&(!cer||(cer==='book'?BOOK.has(r.ceremony):PERM.has(r.ceremony)))&&(!slo||SL.items.has(r.key))&&(!pho||(r.photos&&r.photos.length)));
-  if($('sort').value==='rank') shown.sort((a,b)=>a.rk-b.rk); else shown.sort((a,b)=>a.name.localeCompare(b.name));
+    &&(!cer||(cer==='book'?BOOK.has(r.ceremony):PERM.has(r.ceremony)))&&(!slo||SL.items.has(r.key))&&(!pho||(r.photos&&r.photos.length))
+    &&(!hasO||!rad||(radT?r.dt<=radT:r.dm<=radD)));
+  const srt=$('sort').value;
+  if(srt==='dist'&&hasO) shown.sort((a,b)=>a.dt-b.dt||a.rk-b.rk); else if(srt==='az') shown.sort((a,b)=>a.name.localeCompare(b.name)); else shown.sort((a,b)=>a.rk-b.rk);
   $('count').textContent=shown.length; limit=80; render(); draw(); SL.lastKeys=[...SL.items.keys()].sort().join('|');
-  try{localStorage.setItem('ruins-f2',JSON.stringify({q:$('q').value,sel,conf,cer,sort:$('sort').value,W}))}catch(e){}
+  try{localStorage.setItem('ruins-f2',JSON.stringify({q:$('q').value,sel,conf,cer,sort:$('sort').value,W,origin:hasO?{name:ORIGIN.name,lat:ORIGIN.lat,lon:ORIGIN.lon}:null,rad}))}catch(e){}
 }
 function accessClass(a){return a==='Free, open'?'free':a==='Paid / staffed'?'paid':''}
 function bars(r){return '<div class="bars">'+CRIT.map(([k,l])=>`<div class="bar"><span>${l}</span><span class="track"><span class="fill" style="width:${r[k]*10}%"></span></span><b>${Number.isInteger(r[k])?r[k]:r[k].toFixed(1)}</b></div>`).join('')+'</div>';}
@@ -293,6 +394,7 @@ function card(r){
     <div><h2>${esc(r.name)}</h2><div class="where">${esc(r.near)}, ${esc(r.council)}</div><div class="grid">${esc(r.grid)}</div>${bars(r)}</div>
     <div class="chips">${cer}<span class="chip t">${esc(r.type)}</span><span class="chip ${accessClass(r.access)}">${esc(r.access)}</span><span class="chip">${esc(r.setting)}</span><span class="chip">${esc(r.condition)}</span>${r.status?`<span class="chip">${esc(r.status)}</span>`:''}${r.verify?'<span class="chip verify">Check before visiting</span>':''}</div>
     <div><p class="notes">${esc(r.notes)}</p>${r.verdict?`<p class="verdict">${esc(r.verdict)}</p>`:(r.why?`<p class="verdict">${esc(r.why)}</p>`:'')}
+    ${ORIGIN.lat!=null?`<div class="meta drive">${driveLine(r)}</div>`:''}
     <div class="meta">${drive}</div>
     <div class="meta">Stay: ${esc(r.lodging_detail||r.lodging_base)}${r.capacity_note?' · '+esc(r.capacity_note):''}</div>
     <div class="meta">${esc(r.period)} · Owner: ${esc(r.owner)}</div>
@@ -353,6 +455,8 @@ function draw(){
   if(typeof SL!=='undefined') DATA.forEach(r=>{if(!SL.items.has(r.key))return;const[x,y]=px(r);ctx.strokeStyle=ink;ctx.lineWidth=1.6*sc;ctx.beginPath();ctx.arc(x,y,5.5*sc,0,7);ctx.stroke();});
   ctx.font=`500 ${11*sc}px "Public Sans", system-ui, sans-serif`; ctx.textBaseline='middle';
   ctx.lineJoin='round';PLACES.forEach(([n,la,lo])=>{const[x,y]=px({lat:la,lon:lo});ctx.fillStyle=lab;ctx.fillRect(x-1.5*sc,y-1.5*sc,3*sc,3*sc);ctx.strokeStyle=tok('--land');ctx.lineWidth=3*sc;ctx.strokeText(n,x+5*sc,y);ctx.fillText(n,x+5*sc,y);});
+  if(ORIGIN.lat!=null){const[x,y]=px(ORIGIN);ctx.strokeStyle=ink;ctx.lineWidth=2*sc;ctx.beginPath();ctx.arc(x,y,7*sc,0,7);ctx.stroke();ctx.fillStyle=ink;ctx.beginPath();ctx.arc(x,y,2.5*sc,0,7);ctx.fill();
+    ctx.font=`600 ${12*sc}px "Public Sans", system-ui, sans-serif`;if(!PLACES.some(p=>p[0]===ORIGIN.name)){ctx.strokeStyle=tok('--land');ctx.lineWidth=3*sc;ctx.strokeText(ORIGIN.name,x+11*sc,y);ctx.fillText(ORIGIN.name,x+11*sc,y);}}
   AIRPORTS.forEach(([n,la,lo],j)=>{const[x,y]=px({lat:la,lon:lo});ctx.font=`600 ${12*sc}px system-ui, sans-serif`;const t='✈ '+n;const tx=x-34*sc,ty=y+(j?12:-12)*sc;ctx.strokeStyle=tok('--land');ctx.lineWidth=3*sc;ctx.strokeText(t,tx,ty);ctx.fillStyle=ink;ctx.fillText(t,tx,ty);});
 }
 function nearest(ev){
@@ -369,14 +473,18 @@ window.addEventListener('resize',draw);
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change',draw);
 new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
 
-['q',...F,'confirmed','ceremony','sort','photosonly'].forEach(id=>$(id).addEventListener('input',filter));
+['q',...F,'confirmed','ceremony','sort','photosonly','radius'].forEach(id=>$(id).addEventListener('input',filter));
+$('place').addEventListener('change',()=>setOrigin($('place').value));
+$('place').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();setOrigin($('place').value);}});
+$('quick').addEventListener('click',e=>{const b=e.target.closest('[data-place]');if(!b)return;if(ORIGIN.name===b.dataset.place){clearOrigin();filter();}else{$('place').value=b.dataset.place;setOrigin(b.dataset.place);}});
 CRIT.forEach(([k])=>$('w_'+k).addEventListener('input',e=>{W[k]=+e.target.value;showW();filter();}));
 const W0={...W};
 $('wreset').onclick=()=>{Object.assign(W,W0);syncW();filter();};
-$('reset').onclick=()=>{$('photosonly').checked=false;SL.only=false;$('slonly').setAttribute('aria-pressed','false');$('q').value='';F.forEach(k=>$(k).value='');$('confirmed').checked=false;$('ceremony').value='';filter();};
-try{const s=JSON.parse(localStorage.getItem('ruins-f2')||'null');if(s){$('q').value=s.q||'';F.forEach(k=>{$(k).value=s.sel?.[k]||''});$('confirmed').checked=!!s.conf;$('ceremony').value=s.cer||'';$('sort').value=s.sort||'rank';if(s.W)Object.assign(W,s.W);}}catch(e){}
+$('reset').onclick=()=>{$('photosonly').checked=false;SL.only=false;$('slonly').setAttribute('aria-pressed','false');$('q').value='';F.forEach(k=>$(k).value='');$('confirmed').checked=false;$('ceremony').value='';$('radius').value='';clearOrigin();filter();};
+let savedOrigin=null;
+try{const s=JSON.parse(localStorage.getItem('ruins-f2')||'null');if(s){$('q').value=s.q||'';F.forEach(k=>{$(k).value=s.sel?.[k]||''});$('confirmed').checked=!!s.conf;$('ceremony').value=s.cer||'';$('sort').value=s.sort||'rank';if(s.W)Object.assign(W,s.W);$('radius').value=s.rad||'';if(s.origin&&s.origin.name&&typeof s.origin.lat==='number')savedOrigin=s.origin;}}catch(e){}
 syncW();
-filter();
+if(savedOrigin){$('place').value=savedOrigin.name;setOrigin(savedOrigin.name,savedOrigin);} else filter();
 slInit();
 </script>
 </body></html>
